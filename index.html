@@ -34,7 +34,7 @@
          <button id="btn_getSScanImage" type="button">getSScanImage</button>
         </div>
 
-        <img id="img_sscan" height="600" width="800" >
+        <img id="img_sscan" style="width: 800px;height: 600px;" >
 
 
 <!--        </img>-->
@@ -44,15 +44,17 @@
 <div>
     <button id="btn_getRawData" type="button">getRawData</button>
     <div id="container_image" width="800" height="600"></div>
-<!--    <canvas id="canvas"></canvas>-->
+    <canvas id="canvas" width="200" height="800"></canvas>
 <div id="stage-parent" style="width: 20%">
 <div id="container"></div>
 </div>
 
        <script>
            //ascan 画布
-           var sceneWidth  = 8192;
-           var sceneHeight  =3600;
+           var MAX_ASCAN_VALUE=2048
+
+           var sceneWidth  = 2048;
+           var sceneHeight  =MAX_ASCAN_VALUE;
            var stage = new Konva.Stage({
                container: 'container',
                width: sceneWidth,
@@ -187,9 +189,19 @@
                           int16View[0]=uint16View[0]; //无符号转有符号
                           int16View[0]=Math.abs( int16View[0]);//有符号取绝对值，波形全部转正
                           let temp =  int16View[0];
+
+                          //以下为仪器对原始数据处理算法
+                          temp=temp/4;
+                          temp=temp+1024;
+                          if(temp>(MAX_ASCAN_VALUE-1)){
+                              temp=MAX_ASCAN_VALUE-1; //边界处理
+
+                          }
+                          temp-=1024;   //y 坐标零点对齐
+
                           rawDataArray[i]=temp;
                           rawDataAxiArray[i*2]=i;//横坐标
-                          rawDataAxiArray[i*2+1]=(rawDataArray[i])/20;//纵坐标缩小16倍
+                          rawDataAxiArray[i*2+1]=(rawDataArray[i]);//纵坐标缩小8倍
                       }
 
 
@@ -207,23 +219,15 @@
                       // fitStageIntoParentContainer();
 
 
-                      const canvas = document.createElement('canvas');
-                      // const canvas = document.getElementById("canvas");
+                      // const canvas = document.createElement('canvas');
+                      const canvas = document.getElementById("canvas");
                       const ctx = canvas.getContext("2d");
-                      let arr = new Uint8ClampedArray(frameLen*4);
+                      let arr = new Uint8ClampedArray(4*frameLen);
 
-// Fill the array with the same RGBA values
-//                       for (let i = 0; i < arr.length; i += 4) {
-//                           arr[i + 0] = 0; // R value
-//                           arr[i + 1] = 190; // G value
-//                           arr[i + 2] = 0; // B value
-//                           arr[i + 3] = 255; // A value
-//                       }
 
-// Initialize a new ImageData object
 
                           //draw sscan
-                      layer_sscan.find("Image").destroy();
+                      // layer_sscan.find("Image").destroy();
 
 
                       if(value.length==frameLen*2+12){
@@ -238,27 +242,36 @@
                                   int16View[0]=Math.abs( int16View[0]);
                                   uint16View[0]=int16View[0];
                                   let temp=  uint16View[0];
-                                  // console.log((temp/128)|0);
-                                  //横向数组写值
-                                  arr[(i+ (j*beamLen ))*4]=(colorTables[(temp/128)| 0] & 0xff0000)>>16;
-                                  arr[(i+(j*beamLen ))*4+1]=(colorTables[(temp/128)| 0] & 0xff00)>>8;
-                                  arr[(i+(j*beamLen ))*4+2]=(colorTables[(temp/128)| 0] & 0xff);
-                                  arr[(i+ (j*beamLen ))*4+3]=0xff;
-                                  // console.log(signed_temp);
+
+                                  //以下为仪器对原始数据处理算法
+                                  temp=temp/4;
+                                  temp=temp+1024;
+                                  if(temp>(MAX_ASCAN_VALUE-1)){  //边界处理不能高于2048
+                                      temp=MAX_ASCAN_VALUE-1;
+                                  }
+
+                                  temp-=1024;  //Y轴零点对齐
+                                  //像仪器一样处理，也可自行处理
+                                  let zoom_factor=256/(MAX_ASCAN_VALUE-1024);
+                                  arr[(j+ (i*beamCount ))*4]=(colorTables[(temp*zoom_factor)|0] & 0xff0000)>>16; //R
+                                  arr[(j+(i*beamCount ))*4+1]=(colorTables[(temp*zoom_factor)|0] & 0xff00)>>8; //G
+                                  arr[(j+(i*beamCount ))*4+2]=(colorTables[(temp*zoom_factor)|0] & 0xff);//B
+                                  arr[(j+ (i*beamCount ))*4+3]=0xff; //
                               }
                           }
+
                       }
-                      let imageData = new ImageData(arr, beamLen);
+                      let imageData = new ImageData(arr, beamCount);
 // Draw image data to the canvas
-                      ctx.putImageData(imageData, 0, 0);
+                      ctx.putImageData(imageData, 0,0);
                       // canvas.width(beamLen);
                       // canvas.height(beamCount);
 //                       const canvas = document.createElement('canvas');
 //
 // // .... draw your imageData into canvas
-                      const image = new Konva.Image({ image: canvas});
-                      layer_sscan.add(image);
-                      layer_sscan.draw();
+//                       const image = new Konva.Image({ image: canvas,width:frameLen});
+//                       layer_sscan.add(image);
+//                       layer_sscan.draw();
 
                   }
                }
@@ -303,7 +316,7 @@
                uint8[1] = 0;
                uint8[2] = 0;
                uint8[3] = 0;
-               window.paTcpApiSend.sendPaData(uint8)
+               window.paTcpApiSendCtrl.sendPaCtrl(uint8)
            })
            //获取波形数据按钮回调
            var enterFlag=0
@@ -350,7 +363,7 @@
                uint8[3] = 0;
                window.paTcpApiSendCtrl.sendPaCtrl(uint8)
 
-           },50); //每50秒获取一次SScan
+           },50); //每50毫秒获取一次SScan图像
 
 
 

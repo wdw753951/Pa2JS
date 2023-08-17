@@ -171,7 +171,7 @@ function createWindow () {
 
   var HOST = '127.0.0.1'; //server ip
   var PORT = 45680; //tcp port
-  var PORT_CTRL=45681 //tcp data_port
+  var PORT_CTRL=45681 //tcp ctrl_port
   // var PORT = 8888; //tcp port
 
 
