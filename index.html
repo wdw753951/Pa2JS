@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="append_js/jquery.min.js"></script>
+    <script src="append_js/konva.min.js"></script>
+    <meta charset="UTF-8">
+    <title>Hello !</title>
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
+
+    <style>
+    #container{
+        width:200px;
+        height: 200px;
+    }
+
+    </style>
+
+</head>
+<body>
+<!--    <h1>Hello !</h1>-->
+<!--    <p>-->
+<!--        We are using Node.js <span id="node-version"></span>,-->
+<!--        Chromium <span id="chrome-version"></span>,-->
+<!--        and Electron <span id="electron-version"></span>.-->
+<!--    </p>-->
+        <div>
+        RawDataLength:   <lable id="label_rawDataLength"/>
+        </div>
+        <div>
+       <button id="btn_getRawLength" type="button">getRawDataLength</button>
+        </div>
+
+        <div>
+         <button id="btn_getSScanImage" type="button">getSScanImage</button>
+        </div>
+
+        <img id="img_sscan" height="600" width="800" >
+
+
+<!--        </img>-->
+
+<!--        <script src="./renderer.js"></script>-->
+
+<div>
+    <button id="btn_getRawData" type="button">getRawData</button>
+    <div id="container_image" width="800" height="600"></div>
+<!--    <canvas id="canvas"></canvas>-->
+<div id="stage-parent" style="width: 20%">
+<div id="container"></div>
+</div>
+
+       <script>
+           //ascan 画布
+           var sceneWidth  = 8192;
+           var sceneHeight  =3600;
+           var stage = new Konva.Stage({
+               container: 'container',
+               width: sceneWidth,
+               height: sceneHeight,
+           });
+           //
+           var layer = new Konva.Layer();
+           stage.add(layer);
+
+
+           var rect1 = new Konva.Rect({
+               x: 0,
+               y: 0,
+               width: sceneWidth,
+               height: sceneHeight,
+               fill: '#303030',
+           });
+           layer.add(rect1)
+
+           // function fitStageIntoParentContainer() {
+           //     var container = document.querySelector('#stage-parent');
+           //
+           //     // now we need to fit stage into parent container
+           //     var containerWidth = container.offsetWidth;
+           //
+           //     // but we also make the full scene visible
+           //     // so we need to scale all objects on canvas
+           //     var scale = containerWidth / sceneWidth;
+           //
+           //     stage.width(sceneWidth * scale);
+           //     stage.height(sceneHeight * scale);
+           //     stage.scale({ x: scale, y: scale });
+           // }
+
+
+
+            //sscan 画布
+
+           var stage_sscan = new Konva.Stage({
+               container: 'container_image',
+               width: 800,
+               height: 600,
+           });
+           //
+           var layer_sscan = new Konva.Layer();
+           stage_sscan.add(layer_sscan);
+
+
+
+
+
+
+           var beamCount=0; //波形数量
+           var beamLen=0; //波长
+           var frameLen=0; //帧长
+           var currentBeam=26;//当前波形编号
+           var rawDataArray;//波形数据数组每个点位2byte 单位
+           var HEAD_LENGTH=40; //包头长度
+
+           const getLengthButton = document.getElementById('btn_getRawLength')
+           const getRawData = document.getElementById('btn_getRawData')
+           const dataLength = document.getElementById('label_rawDataLength')
+           const getSScanImage = document.getElementById('btn_getSScanImage')
+
+
+           const RecvType = {
+               SScanImage: 0,//06000000
+               RawData: 1,//05000000
+               RawDataLength: 3, //07000000
+               GetConfig: 4,
+               UDP:6
+           }
+
+           var recvType=RecvType.ScanImage;
+           // const counter = document.getElementById('counter')
+
+
+           function arrayBufferToBase64(buffer) { //图片转码 函数
+               var binary = '';
+               // var buffer = new Uint8Array(buffer);
+               var len = buffer.byteLength;
+               for (var i = 0; i < len; i++) {
+                   binary += String.fromCharCode(buffer[i]);
+               }
+               return window.btoa(binary);
+           }
+
+
+
+
+           let int16_buffer = new ArrayBuffer(2);
+           let int16View = new Int16Array(int16_buffer); //js 没有16位整形变量 所以要自己创建
+           let uint16_buffer = new ArrayBuffer(2);
+           let uint16View = new Uint16Array(uint16_buffer);//js 没有16位无符号整形变量 所以要自己创建
+
+           window.paTcpApiGet.getPaData((_event, value) => { //和主线程通讯，即时获得tcp数据
+               // console.log( value);
+               // counter.innerText = Array.from(value);
+           //
+               let cmd=value[4]; //获取命令
+               cmd+=value[5]<<8;
+               cmd+=value[6]<<16;
+               cmd+=value[7]<<24;
+
+            if(cmd==RecvType.RawDataLength){
+                value=value.slice(HEAD_LENGTH)
+                dataLength.innerText= value[2];
+                beamCount=value[2];
+
+                let length=value[1];
+                length=length<<8;
+                length+=value[0];
+                // console.log(length);
+                beamLen=length;
+                frameLen=beamLen*beamCount;
+                rawDataArray=new Int16Array(beamLen); //波形值为[-32768  -  32767]
+                rawDataAxiArray=new Int16Array(beamLen*2)
+            }
+
+               if(cmd==RecvType.RawData){
+                   if(frameLen==0){
+                       return;
+                   }
+                   value=value.slice(HEAD_LENGTH)
+
+
+                  if(value.length==frameLen*2+12){ //每一帧的的数据 每个点有两个字节的数据 以及12个预留字节
+                      for(let i=0;i<beamLen;i++) {
+                          uint16View[0]  = value[(i * 2) + 1 + (currentBeam * beamLen * 2) + 12];
+                          uint16View[0]  =  uint16View[0]  << 8; //左移八位
+                          uint16View[0]  += value[(i * 2) + (currentBeam * beamLen * 2) + 12];  //波形值为2个字节拼接而成
+                          int16View[0]=uint16View[0]; //无符号转有符号
+                          int16View[0]=Math.abs( int16View[0]);//有符号取绝对值，波形全部转正
+                          let temp =  int16View[0];
+                          rawDataArray[i]=temp;
+                          rawDataAxiArray[i*2]=i;//横坐标
+                          rawDataAxiArray[i*2+1]=(rawDataArray[i])/20;//纵坐标缩小16倍
+                      }
+
+
+                      let yellowLine = new Konva.Line({ //新增一条波形
+                          points:rawDataAxiArray ,
+                          stroke: 'yellow',
+                          strokeWidth: 2,
+                          lineCap: 'round',
+                          lineJoin: 'round',
+                      });
+                      // stage.width(beamLen);
+                      layer.find('Line').destroy();//毁掉原来的线
+                      layer.add(yellowLine);
+                      layer.draw();//刷新层
+                      // fitStageIntoParentContainer();
+
+
+                      const canvas = document.createElement('canvas');
+                      // const canvas = document.getElementById("canvas");
+                      const ctx = canvas.getContext("2d");
+                      let arr = new Uint8ClampedArray(frameLen*4);
+
+// Fill the array with the same RGBA values
+//                       for (let i = 0; i < arr.length; i += 4) {
+//                           arr[i + 0] = 0; // R value
+//                           arr[i + 1] = 190; // G value
+//                           arr[i + 2] = 0; // B value
+//                           arr[i + 3] = 255; // A value
+//                       }
+
+// Initialize a new ImageData object
+
+                          //draw sscan
+                      layer_sscan.find("Image").destroy();
+
+
+                      if(value.length==frameLen*2+12){
+                          for(let j=0;j<beamCount;j++) {
+                              for (let i = 0; i < beamLen; i++) {
+
+                                  // let cut=value.slice(12+(currentBeam * beamLen)+12,beamLen+(currentBeam * beamLen)+12);
+                                  uint16View[0]  = value[(i * 2) + 1 + (j * beamLen * 2) + 12];
+                                  uint16View[0]  =  uint16View[0]  << 8; //左移八位
+                                  uint16View[0]  += value[(i * 2) + (j * beamLen * 2) + 12];  //波形值为2个字节拼接而成
+                                  int16View[0]=uint16View[0];
+                                  int16View[0]=Math.abs( int16View[0]);
+                                  uint16View[0]=int16View[0];
+                                  let temp=  uint16View[0];
+                                  // console.log((temp/128)|0);
+                                  //横向数组写值
+                                  arr[(i+ (j*beamLen ))*4]=(colorTables[(temp/128)| 0] & 0xff0000)>>16;
+                                  arr[(i+(j*beamLen ))*4+1]=(colorTables[(temp/128)| 0] & 0xff00)>>8;
+                                  arr[(i+(j*beamLen ))*4+2]=(colorTables[(temp/128)| 0] & 0xff);
+                                  arr[(i+ (j*beamLen ))*4+3]=0xff;
+                                  // console.log(signed_temp);
+                              }
+                          }
+                      }
+                      let imageData = new ImageData(arr, beamLen);
+// Draw image data to the canvas
+                      ctx.putImageData(imageData, 0, 0);
+                      // canvas.width(beamLen);
+                      // canvas.height(beamCount);
+//                       const canvas = document.createElement('canvas');
+//
+// // .... draw your imageData into canvas
+                      const image = new Konva.Image({ image: canvas});
+                      layer_sscan.add(image);
+                      layer_sscan.draw();
+
+                  }
+               }
+
+               if(cmd==RecvType.SScanImage){
+                   //
+                   value=value.slice(HEAD_LENGTH)
+                   let url= arrayBufferToBase64(value);
+                   // console.log(url);
+                   $('#img_sscan').attr("src","data:" +"jpg" + ";base64," + url)
+                   // layer_sscan.find('Image').destroy();//毁掉原来SSCAN图像
+                   // var imageObj = new Image();
+                   // imageObj.onload = function () {
+                   //     var yoda = new Konva.Image({
+                   //         image: imageObj,
+                   //         x:0,
+                   //         y:0,
+                   //         width: 800,
+                   //         height: 600,
+                   //     });
+                   //     // add the shape to the layer
+                   //     layer_sscan.add(yoda);
+                   //     layer_sscan.draw();
+                   // };
+                   // imageObj.src = "data:image/jpeg;base64,"+url;;
+
+
+
+
+
+               }
+           })
+
+
+           //获取波形长度参数按钮回调
+           getLengthButton.addEventListener('click', () => {
+               // const data = titleInput.value
+               recvType=RecvType.RawDataLength
+
+               let uint8 = new Uint8Array(4);
+               uint8[0] = 7;
+               uint8[1] = 0;
+               uint8[2] = 0;
+               uint8[3] = 0;
+               window.paTcpApiSend.sendPaData(uint8)
+           })
+           //获取波形数据按钮回调
+           var enterFlag=0
+           getRawData.addEventListener('click', () => {
+               // const data = titleInput.value
+               if(beamLen==0){ //没获取波形长度，返回
+                   return;
+               }
+                if(enterFlag==1){//禁止重复进入
+                    return;
+                }
+               enterFlag=1;
+               setInterval (function(){
+               recvType=RecvType.RawData
+
+               let uint8 = new Uint8Array(4);
+               uint8[0] = 5;
+               uint8[1] = 0;
+               uint8[2] = 0;
+               uint8[3] = 0;
+               window.paTcpApiSend.sendPaData(uint8)
+               },20);
+           })
+           //获取SScan图像回调，可根据A扫，自己画，底部有我们仪器的颜色表
+           getSScanImage.addEventListener('click', () => {
+               // const data = titleInput.value
+               recvType=RecvType.SScanImage
+
+               let uint8 = new Uint8Array(4);
+               uint8[0] = 6;
+               uint8[1] = 0;
+               uint8[2] = 0;
+               uint8[3] = 0;
+               window.paTcpApiSend.sendPaData(uint8)
+           })
+
+           setInterval (function(){
+
+
+               let uint8 = new Uint8Array(4);
+               uint8[0] = 6;
+               uint8[1] = 0;
+               uint8[2] = 0;
+               uint8[3] = 0;
+               window.paTcpApiSendCtrl.sendPaCtrl(uint8)
+
+           },50); //每50秒获取一次SScan
+
+
+
+       </script>
+
+
+
+
+    <script>
+
+        //cscan 颜色表
+        var colorTables = [
+            0xffffffff, 0xfffafcfe, 0xfff6fafd, 0xfff2f7fd, 0xffeef5fc, 0xffeaf2fb, 0xffe6f0fb, 0xffe1edfa,
+            0xffddebf9, 0xffd9e8f9, 0xffd5e6f8, 0xffd1e3f7, 0xffcde1f7, 0xffc8def6, 0xffc4dcf6, 0xffc0d9f5,
+            0xffbcd7f4, 0xffb8d4f4, 0xffb4d2f3, 0xffafd0f2, 0xffabcdf2, 0xffa7cbf1, 0xffa3c8f0, 0xff9fc6f0,
+            0xff9bc3ef, 0xff96c1ef, 0xff92beee, 0xff8ebced, 0xff8ab9ed, 0xff86b7ec, 0xff82b4eb, 0xff7db2eb,
+            0xff79afea, 0xff75ade9, 0xff71aae9, 0xff6da8e8, 0xff69a6e8, 0xff66a1e5, 0xff639de2, 0xff6099df,
+            0xff5d95dc, 0xff5a91da, 0xff588dd7, 0xff5589d4, 0xff5285d1, 0xff4f81cf, 0xff4c7dcc, 0xff4979c9,
+            0xff4775c6, 0xff4471c3, 0xff416dc1, 0xff3e69be, 0xff3b65bb, 0xff3861b8, 0xff365db6, 0xff3359b3,
+            0xff3055b0, 0xff2d51ad, 0xff2a4daa, 0xff2749a8, 0xff2545a5, 0xff2241a2, 0xff1f3d9f, 0xff1c399d,
+            0xff19359a, 0xff163197, 0xff142d94, 0xff112991, 0xff0e258f, 0xff0b218c, 0xff081d89, 0xff051986,
+            0xff031584, 0xff041883, 0xff061c83, 0xff082083, 0xff0a2483, 0xff0c2883, 0xff0e2c83, 0xff103082,
+            0xff123482, 0xff143882, 0xff153c82, 0xff174082, 0xff194482, 0xff1b4881, 0xff1d4c81, 0xff1f5081,
+            0xff215481, 0xff235881, 0xff255c81, 0xff266080, 0xff286480, 0xff2a6880, 0xff2c6c80, 0xff2e7080,
+            0xff307480, 0xff32787f, 0xff347c7f, 0xff36807f, 0xff37847f, 0xff39887f, 0xff3b8c7f, 0xff3d907e,
+            0xff3f947e, 0xff41987e, 0xff439c7e, 0xff45a07e, 0xff47a47e, 0xff4ca67b, 0xff51a878, 0xff56aa75,
+            0xff5bac72, 0xff60ae6f, 0xff65b06c, 0xff6ab269, 0xff6fb467, 0xff74b764, 0xff79b961, 0xff7ebb5e,
+            0xff83bd5b, 0xff88bf58, 0xff8dc155, 0xff92c353, 0xff97c550, 0xff9cc74d, 0xffa1ca4a, 0xffa6cc47,
+            0xffabce44, 0xffb0d041, 0xffb5d23f, 0xffbad43c, 0xffbfd639, 0xffc4d836, 0xffc9da33, 0xffcedd30,
+            0xffd3df2d, 0xffd8e12b, 0xffdde328, 0xffe2e525, 0xffe7e722, 0xffece91f, 0xfff1eb1c, 0xfff6ed19,
+            0xfffcf017, 0xfffaec19, 0xfff9e91b, 0xfff8e61d, 0xfff7e31f, 0xfff6df22, 0xfff5dc24, 0xfff4d926,
+            0xfff2d628, 0xfff1d32b, 0xfff0cf2d, 0xffefcc2f, 0xffeec931, 0xffedc633, 0xffecc236, 0xffeabf38,
+            0xffe9bc3a, 0xffe8b93c, 0xffe7b63f, 0xffe6b241, 0xffe5af43, 0xffe4ac45, 0xffe2a947, 0xffe1a54a,
+            0xffe0a24c, 0xffdf9f4e, 0xffde9c50, 0xffdd9953, 0xffdc9555, 0xffda9257, 0xffd98f59, 0xffd88c5b,
+            0xffd7885e, 0xffd68560, 0xffd58262, 0xffd47f64, 0xffd37c67, 0xffd27b64, 0xffd27b62, 0xffd27b60,
+            0xffd27a5e, 0xffd17a5b, 0xffd17a59, 0xffd17957, 0xffd17955, 0xffd07953, 0xffd07850, 0xffd0784e,
+            0xffd0784c, 0xffcf774a, 0xffcf7747, 0xffcf7745, 0xffcf7643, 0xffce7641, 0xffce763f, 0xffce753c,
+            0xffce753a, 0xffcd7538, 0xffcd7436, 0xffcd7433, 0xffcd7431, 0xffcc732f, 0xffcc732d, 0xffcc732b,
+            0xffcc7228, 0xffcb7226, 0xffcb7224, 0xffcb7122, 0xffcb711f, 0xffca711d, 0xffca701b, 0xffca7019,
+            0xffca7017, 0xffc86d17, 0xffc66a17, 0xffc56717, 0xffc36417, 0xffc26217, 0xffc05f18, 0xffbe5c18,
+            0xffbd5918, 0xffbb5718, 0xffba5418, 0xffb85118, 0xffb74e19, 0xffb54b19, 0xffb34919, 0xffb24619,
+            0xffb04319, 0xffaf4019, 0xffad3e1a, 0xffab3b1a, 0xffaa381a, 0xffa8351a, 0xffa7321a, 0xffa5301a,
+            0xffa42d1b, 0xffa22a1b, 0xffa0271b, 0xff9f251b, 0xff9d221b, 0xff9c1f1b, 0xff9a1c1c, 0xff98191c,
+            0xff97171c, 0xff95141c, 0xff94111c, 0xff920e1c, 0xff910c1d, 0xff8f091d, 0xff8e061d, 0xff8c031d,
+            0xff000000, 0xffffffff, 0xff808080
+        ];
+    </script>
+
+
+
+</body>
+</html>
+
